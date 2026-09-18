@@ -1,0 +1,12 @@
+PUT name Ali
+PUT city Karachi
+PUT role Engineer
+DELETE city
+PUT name Ali
+PUT city Karachi
+PUT role Engineer
+DELETE city
+PUT name Ali
+PUT city Karachi
+PUT role Engineer
+DELETE city

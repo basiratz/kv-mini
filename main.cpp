@@ -1,16 +1,43 @@
+#include "kvstore.hpp"
 #include <iostream>
-#include "file.hpp"
 
-void test_raii(){
-     // open the file for writing (we will create if mising, append mode)
-    File f("test_log.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
-    f.append("Log entry 1\n");
-    f.append("Log entry 2\n");
-    //destructor will run auto
-}
 int main() {
-    std::cout<<"Testing RAII file wrapper....\n";
-    test_raii();
-    std::cout<<"File auto closed with out manual close() call... \n";
+    const std::string wal_file = "wal.log";
+
+    std::cout << "=== RUN 1: Writing data & crashing/exiting ===\n";
+    {
+        KVStore db(wal_file);
+        db.put("name", "Ali");
+        db.put("city", "Karachi");
+        db.put("role", "Engineer");
+
+        std::cout << "State before deletion:\n";
+        db.print_all();
+
+        db.remove("city");
+
+        std::cout << "State before shutdown:\n";
+        db.print_all();
+    } // `db` destructor runs here, object destroyed
+
+    std::cout << "\n=== RUN 2: Startup & Recovering from WAL ===\n";
+    {
+        // Fresh KVStore instance reading the existing wal.log file
+        KVStore db2(wal_file);
+
+        std::cout << "Recovered State:\n";
+        db2.print_all();
+
+        auto name = db2.get("name");
+        if (name) {
+            std::cout << "Successfully retrieved recovered 'name': " << *name << "\n";
+        }
+
+        auto city = db2.get("city");
+        if (!city) {
+            std::cout << "Verified 'city' remains deleted after recovery!\n";
+        }
+    }
+
     return 0;
 }
