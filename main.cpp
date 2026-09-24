@@ -4,44 +4,40 @@
 int main() {
     const std::string wal_file = "wal.log";
 
-    // Small MemTable size (3) to trigger flushes quickly for testing
-    KVStore db(wal_file, 3);
+    // MemTable size = 8, Block size = 4
+    KVStore db(wal_file, 8, 4);
 
-    std::cout << "=== Populating Storage Engine ===\n";
+    std::cout << "=== Inserting 8 items to fill MemTable ===\n";
     db.put("apple", "red");
     db.put("banana", "yellow");
-    db.put("cherry", "dark_red"); // Flush 1 (sst_000001.sst)
-
+    db.put("cherry", "dark_red");
     db.put("date", "brown");
     db.put("elderberry", "purple");
-    db.put("fig", "green");      // Flush 2 (sst_000002.sst)
-
+    db.put("fig", "green");
     db.put("grape", "purple");
-    db.put("honeydew", "green");
-    db.put("kiwi", "brown");     // Flush 3 (sst_000003.sst)
+    db.put("honeydew", "green"); // Triggers flush to sst_000001.sst
 
-    db.put("lemon", "yellow");   // Stored in MemTable
+    std::cout << "\n=== DB Overview ===\n";
+    db.print_all();
 
-    std::cout << "\n=== Testing Binary Search Lookups ===\n";
+    std::cout << "\n=== Testing Sparse Index Lookups ===\n";
 
-    std::cout << "1. Looking up 'apple' (In sst_000001.sst):\n";
-    auto v1 = db.get("apple");
+    // "cherry" is index 2 in SSTable (between index 0 "apple" and index 4 "elderberry")
+    std::cout << "Looking up 'cherry' (Not directly indexed, lies inside block 0):\n";
+    auto v1 = db.get("cherry");
 
-    std::cout << "\n2. Looking up 'elderberry' (In sst_000002.sst):\n";
+    // "elderberry" is index 4 in SSTable (Directly indexed entry)
+    std::cout << "\nLooking up 'elderberry' (Directly indexed entry):\n";
     auto v2 = db.get("elderberry");
 
-    std::cout << "\n3. Looking up 'lemon' (In MemTable):\n";
-    auto v3 = db.get("lemon");
+    // "fig" is index 5 in SSTable (Inside block 1)
+    std::cout << "\nLooking up 'fig' (Inside block 1):\n";
+    auto v3 = db.get("fig");
 
-    std::cout << "\n4. Removing 'apple' (Inserts Tombstone):\n";
-    if (db.remove("apple")) {
-        std::cout << "  -> Successfully marked 'apple' for deletion.\n";
-    }
-
-    std::cout << "\n5. Looking up 'apple' after deletion:\n";
-    auto v4 = db.get("apple");
+    std::cout << "\nLooking up 'watermelon' (Non-existent):\n";
+    auto v4 = db.get("watermelon");
     if (!v4) {
-        std::cout << "  -> Verified 'apple' returns missing/deleted!\n";
+        std::cout << "  -> 'watermelon' correctly not found.\n";
     }
 
     return 0;

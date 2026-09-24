@@ -11,15 +11,17 @@
 #include <iomanip>
 #include <sstream>
 
+const std::string TOMBSTONE = "__DELETED_TOMBSTONE__";
 
+    
 class KVStore{
 private:
     std::map<std::string, std::string> data_;
     WAL wal_;
     std::vector<SSTable> sstables_;
     size_t max_memtable_size_;
+    size_t block_size_;
     size_t sstable_counter_ = 0;
-    const std::string TOMBSTONE = "__DELETED_TOMBSTONE__";
 
     // helper to generate sequential filenames like 000001.sst ..
     std::string generate_sstable_filename(){
@@ -37,7 +39,7 @@ private:
         std::cout << "[FLUSH] MemTable full. Flushing to " << filename << "...\n";  
         
         if(SSTable::write_from_memtable(filename, data_)){
-            sstables_.push_back(SSTable(filename));
+            sstables_.push_back(SSTable(filename, block_size_));
             data_.clear(); //clear the RAM
 
             // Clear the WAL file since contents are now safely persisited in the SSTable
@@ -50,8 +52,8 @@ private:
 
 public:
     //constructor recovers the state automatically from the log file
-    explicit KVStore(const std::string& wal_path, size_t max_memtable_size = 3)
-        : wal_(wal_path), max_memtable_size_(max_memtable_size){
+    explicit KVStore(const std::string& wal_path, size_t max_memtable_size = 8, size_t block_size = 4)
+        : wal_(wal_path), max_memtable_size_(max_memtable_size), block_size_(block_size){
         
         // recover un-flushed entries from WAL
         auto entries = wal_.recover();

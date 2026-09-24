@@ -7,46 +7,56 @@
 #include <map> 
 #include <string>
 #include <vector>
+#include <optional>
+
+struct IndexEntry {
+    std::string key;
+    std::streamoff offset;
+};
 
 class SSTable{
 private:
     std::string filename_;
-    //In-memory list of byt offsets where each key begins in the sstable file
-    std::vector<std::streamoff> offsets_;
+    size_t block_size_;
+    std::vector<IndexEntry> sparse_index_;
 
-    // Helper to scan the file once and populate the byte offset array
-
-    void build_offset_index(){
-        offsets_.clear();
+    // Builds a sparse index holding only every K-th key off
+    void build_sparse_index(){
+        sparse_index_.clear();
         std::ifstream in(filename_);
         if(!in.is_open()) return;
 
         size_t count = 0;
-        if(!(in >> count)) return;
+        if(!(in >>count)) return;
 
         std::string dummy;
         std::getline(in, dummy);
 
         std::string key, value;
         for(size_t i=0; i<count; ++i){
-            //Save exact byte position where "key" starts
-            std::streamoff current_offset_ = in.tellg();
-            if(current_offset_ = -1) break;
+            std::streamoff current_offset = in.tellg();
+            if(current_offset == -1) break;
 
             if(!std::getline(in, key) || !std::getline(in, value)){
-                break;
+                break;;
             }
-            offsets_.push_back(current_offset_);
+
+            if(i % block_size_ == 0){
+                sparse_index_.push_back({key, current_offset});
+            }
         }
-    }
 
+    }
+   
 public:
-    explicit SSTable(const std::string& filename) : filename_(filename){}
-
-    std::string filename () const{
-        return filename_;
+    explicit SSTable(const std::string& filename, size_t block_size = 4) 
+            : filename_(filename), block_size_(block_size){
+                build_sparse_index();
     }
-    size_t size() const { return offsets_.size(); }
+
+    std::string filename () const{ return filename_;
+    }
+    size_t index_size() const { return sparse_index_.size(); }
 
 
     // static helper to write a sorted map to a new file (SSTable) on disk
@@ -69,36 +79,50 @@ public:
 // Binary Search on disk file using byte offsets: O(log n)
     std::optional<std::string> get(const std::string& search_key) const {
 
-        if(offsets_.empty()) return std::nullopt;
+        if(sparse_index_.empty()) return std::nullopt;
 
+        // Step 1: Binary Search in-memory Sparse Index
+        int low = 0;
+        int high = static_cast<int>(sparse_index_.size());
+        int target_block_idx = -1;
+
+        while(low<=high){
+            int mid = low + (high - low) /2;
+
+            if(sparse_index_[mid].key <= search_key){
+                target_block_idx = mid; //candidate block start
+                low = mid+1;
+            } else{
+                high = mid -1;
+            }
+        }
+        // If search key is smaller than the smallest indexed key
+        if(target_block_idx == -1) return std::nullopt;
+
+        // Step 2: Jump to the block offset on the disk
         std::ifstream inFile(filename_);
         if(!inFile.is_open()){
             return std::nullopt;
         }
-        int low = 0;
-        int high = static_cast<int>(offsets_.size())-1;
+        inFile.seekg(sparse_index_[target_block_idx].offset);
 
-        while (low <= high)
-        {
-            int mid = low + (high - low) / 2;
-            
-            // seek directly to the byte offset of the middle entry
-            inFile.seekg(offsets_[mid]);
-
-            std::string key, value;
-            if(!std::getline(inFile, key) || !std::getline(inFile, value)){
+        //Step 3: Scanat most block_size_ items for this offset
+        std::string key, value;
+        for (size_t i = 0; i < block_size_; ++i) {
+            if (!std::getline(inFile, key) || !std::getline(inFile, value)) {
                 break;
             }
-            if(key == search_key){
-                return value;
-            } else if( key <search_key){
-                low = mid + 1;
-            } else{
-                high = mid - 1;
+
+            if (key == search_key) {
+                return value; // Found match!
+            }
+
+            // Because keys are sorted, if we pass search_key, it doesn't exist
+            if (key > search_key) {
+                break;
             }
         }
-
-        return std::nullopt;
+        return std::nullopt; //Key not found in block
     }
 
 };
