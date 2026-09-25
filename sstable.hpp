@@ -1,6 +1,7 @@
 #ifndef SSTABLE_HPP
 #define SSTABLE_HPP
 
+#include "bloom_filter.hpp"
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -19,15 +20,16 @@ private:
     std::string filename_;
     size_t block_size_;
     std::vector<IndexEntry> sparse_index_;
+    BloomFilter bloom_filter_;
 
     // Builds a sparse index holding only every K-th key off
-    void build_sparse_index(){
+    void build_sparse_index_and_filter(){
         sparse_index_.clear();
         std::ifstream in(filename_);
         if(!in.is_open()) return;
 
         size_t count = 0;
-        if(!(in >>count)) return;
+        if(!(in >> count)) return;
 
         std::string dummy;
         std::getline(in, dummy);
@@ -40,7 +42,10 @@ private:
             if(!std::getline(in, key) || !std::getline(in, value)){
                 break;;
             }
+            // 1. Add EVERY key to the filter
+            bloom_filter_.add(key);
 
+            // 2. Add key to Sparse Index only everyK-th item
             if(i % block_size_ == 0){
                 sparse_index_.push_back({key, current_offset});
             }
@@ -49,9 +54,10 @@ private:
     }
    
 public:
-    explicit SSTable(const std::string& filename, size_t block_size = 4) 
-            : filename_(filename), block_size_(block_size){
-                build_sparse_index();
+    explicit SSTable(const std::string& filename, size_t block_size = 4, size_t bloom_bits = 64) 
+            : filename_(filename), block_size_(block_size),
+                bloom_filter_(bloom_bits, 3){
+                build_sparse_index_and_filter();
     }
 
     std::string filename () const{ return filename_;
@@ -78,12 +84,21 @@ public:
 
 // Binary Search on disk file using byte offsets: O(log n)
     std::optional<std::string> get(const std::string& search_key) const {
+        
+        //Step 0: Check Bloom filter First!
+        if(!bloom_filter_.contains(search_key)){
+            std::cout << "  [BloomFilter] Key '" << search_key << "' rejected by " 
+                      << filename_ << " (Disk read skipped!)\n";
+            return std::nullopt; // Skip disk read entirely!
+        }
+        std::cout << "  [BloomFilter] Key '" << search_key << "' MAY exist in " 
+                  << filename_ << ". Proceeding to disk search...\n";
 
         if(sparse_index_.empty()) return std::nullopt;
 
         // Step 1: Binary Search in-memory Sparse Index
         int low = 0;
-        int high = static_cast<int>(sparse_index_.size());
+        int high = static_cast<int>(sparse_index_.size()) - 1;
         int target_block_idx = -1;
 
         while(low<=high){

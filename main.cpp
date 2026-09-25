@@ -4,40 +4,31 @@
 int main() {
     const std::string wal_file = "wal.log";
 
-    // MemTable size = 8, Block size = 4
-    KVStore db(wal_file, 8, 4);
+    // MemTable size = 3 (triggers flushes often to build multiple SSTables)
+    KVStore db(wal_file, 3, 4);
 
-    std::cout << "=== Inserting 8 items to fill MemTable ===\n";
+    std::cout << "=== Inserting Batch 1 (Flushes to sst_000001.sst) ===\n";
     db.put("apple", "red");
     db.put("banana", "yellow");
     db.put("cherry", "dark_red");
+
+    std::cout << "\n=== Inserting Batch 2 (Flushes to sst_000002.sst) ===\n";
     db.put("date", "brown");
     db.put("elderberry", "purple");
     db.put("fig", "green");
+
+    std::cout << "\n=== Inserting Batch 3 (MemTable) ===\n";
     db.put("grape", "purple");
-    db.put("honeydew", "green"); // Triggers flush to sst_000001.sst
 
-    std::cout << "\n=== DB Overview ===\n";
-    db.print_all();
+    std::cout << "\n=== Testing Bloom Filter Performance ===\n";
 
-    std::cout << "\n=== Testing Sparse Index Lookups ===\n";
+    std::cout << "\n1. Looking up 'apple' (Exists in sst_000001.sst):\n";
+    auto v1 = db.get("apple");
 
-    // "cherry" is index 2 in SSTable (between index 0 "apple" and index 4 "elderberry")
-    std::cout << "Looking up 'cherry' (Not directly indexed, lies inside block 0):\n";
-    auto v1 = db.get("cherry");
-
-    // "elderberry" is index 4 in SSTable (Directly indexed entry)
-    std::cout << "\nLooking up 'elderberry' (Directly indexed entry):\n";
-    auto v2 = db.get("elderberry");
-
-    // "fig" is index 5 in SSTable (Inside block 1)
-    std::cout << "\nLooking up 'fig' (Inside block 1):\n";
-    auto v3 = db.get("fig");
-
-    std::cout << "\nLooking up 'watermelon' (Non-existent):\n";
-    auto v4 = db.get("watermelon");
-    if (!v4) {
-        std::cout << "  -> 'watermelon' correctly not found.\n";
+    std::cout << "\n2. Looking up 'mango' (Non-existent everywhere):\n";
+    auto v2 = db.get("mango");
+    if (!v2) {
+        std::cout << "  -> 'mango' correctly not found.\n";
     }
 
     return 0;
