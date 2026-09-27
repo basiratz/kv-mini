@@ -2,6 +2,7 @@
 #define SSTABLE_HPP
 
 #include "bloom_filter.hpp"
+#include <cstdio> 
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -9,6 +10,8 @@
 #include <string>
 #include <vector>
 #include <optional>
+
+const std::string TOMBSTONE = "__DELETED_TOMBSTONE__";
 
 struct IndexEntry {
     std::string key;
@@ -66,7 +69,7 @@ public:
 
 
     // static helper to write a sorted map to a new file (SSTable) on disk
-    static bool write_from_memtable(std::string& filename, const std::map<std::string, std::string>& data){
+    static bool write_from_memtable(const std::string& filename, const std::map<std::string, std::string>& data){
         std::ofstream outFile(filename);
         if(!outFile.is_open()){
             return false;
@@ -82,7 +85,73 @@ public:
         return outFile.good();
     }
 
-// Binary Search on disk file using byte offsets: O(log n)
+    // Two-Pointer Merge Compaction of Two SSTable files
+    static bool compact(const SSTable& sst_old, const SSTable& sst_new, const std::string& output_filename){
+        std::ifstream in_old(sst_old.filename());
+        std::ifstream in_new(sst_new.filename());
+
+        if( !in_old.is_open() || !in_new.is_open()) return false;
+
+        size_t count_old = 0, count_new = 0;
+        in_old >> count_old;
+        in_new >> count_new;
+
+        std::string dummy;
+        std::getline(in_old, dummy);
+        std::getline(in_new, dummy);
+
+        std::string k_old, v_old, k_new, v_new;
+        bool has_old = static_cast<bool>(std::getline(in_old, k_old) && std::getline(in_old, v_old));
+        bool has_new = static_cast<bool>(std::getline(in_new, k_new) && std::getline(in_new, v_new));
+
+        // Temporary map to collct merged entries before wrting count hader
+
+        std::map<std::string, std::string> merged_data;
+
+        while (has_old && has_new)
+        {
+            if(k_old < k_new){
+                if(v_old != TOMBSTONE ){
+                    merged_data[k_old] = v_old;
+                }
+                has_old = static_cast<bool>(std::getline(in_old, k_old) && std::getline(in_old, v_old));
+            } else if(k_new < k_old){
+                if(v_new != TOMBSTONE){
+                    merged_data[k_new] = v_new;
+                }
+                has_new = static_cast<bool>(std::getline(in_new, k_new) && std::getline(in_new, v_new));
+            } else{
+                // key exists in both: Newer SSTable value takes priority
+                if(v_new!=TOMBSTONE){
+                    merged_data[k_new] = v_new;
+                }
+                // Advance both readers past the duplicate key
+                has_old = static_cast<bool>(std::getline(in_old, k_old) && std::getline(in_old, v_old));
+                has_new = static_cast<bool>(std::getline(in_new, k_new) && std::getline(in_new, v_new));
+
+            }
+        }
+        // Drain remaining entries from the old sstable
+        while (has_old)
+        {
+            if(v_old != TOMBSTONE) merged_data[k_old] = v_old;
+                has_old = static_cast<bool>(std::getline(in_old, k_old) && std::getline(in_old, v_old));
+        }
+        // Drain remaining entries from the new sstable
+        while (has_new)
+        {
+            if(v_new != TOMBSTONE) merged_data[k_new] = v_new;
+                has_new = static_cast<bool>(std::getline(in_new, k_new) && std::getline(in_new, v_new));
+        }
+
+        // Write the merged map into the new sstable fle
+        return write_from_memtable(output_filename, merged_data);
+        
+        
+        
+    }
+
+    // Binary Search on disk file using byte offsets: O(log n)
     std::optional<std::string> get(const std::string& search_key) const {
         
         //Step 0: Check Bloom filter First!

@@ -4,6 +4,7 @@
 #include "wal.hpp"
 #include "sstable.hpp"
 #include <iostream>
+#include <cstdio>
 #include <string>
 #include <map>
 #include <optional>
@@ -11,7 +12,7 @@
 #include <iomanip>
 #include <sstream>
 
-const std::string TOMBSTONE = "__DELETED_TOMBSTONE__";
+// const std::string TOMBSTONE = "__DELETED_TOMBSTONE__";
 
     
 class KVStore{
@@ -117,6 +118,36 @@ public:
 
 
         return true;
+    }
+
+    // Compaction: Merges the oldest two SSTables into one single SSTable
+    bool compact(){
+        if(sstables_.size() < 2){
+            std::cout << "[COMPACTION] Less than 2 SSTables available. Compaction skipped.\n";
+            return false;
+        }
+        // Pick the oldest 2 sstables (index 0, and index 1)
+        const SSTable& sst_old = sstables_[0];
+        const SSTable& sst_new = sstables_[1];
+
+        std::string merged_filename = generate_sstable_filename();
+        std::cout << "\n[COMPACTION] Merging " << sst_old.filename() << " + " 
+                  << sst_new.filename() << " into " << merged_filename << "...\n";
+        if(SSTable::compact(sst_old, sst_new, merged_filename)){
+            //Delete old physical files off the disk
+            std::remove(sst_old.filename().c_str());
+            std::remove(sst_new.filename().c_str());
+
+            //Replace old SSTables in memory vector with new compacted SSTable
+            SSTable merged_sstable(merged_filename, block_size_);
+            sstables_.erase(sstables_.begin(), sstables_.begin()+2);
+            sstables_.insert(sstables_.begin(), merged_sstable);
+
+            std::cout << "[COMPACTION] Successfully compacted into " << merged_filename << "!\n";
+            return true;
+        }
+        std::cerr << "[ERROR] Compaction failed!\n";
+        return false;
     }
 
     //helper to print current storage state
